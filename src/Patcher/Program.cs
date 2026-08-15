@@ -8,9 +8,23 @@ const string MainWindowName = "SMIDIToKey.MainWindow";
 if (args.Length == 2 && args[0].Equals("check", StringComparison.OrdinalIgnoreCase))
 {
     using var module = ModuleDefMD.Load(Path.GetFullPath(args[1]));
-    var patched = IsPatched(module);
-    Console.WriteLine(patched ? "PATCHED" : "NOT_PATCHED");
-    return patched ? 0 : 1;
+    if (!IsPatched(module))
+    {
+        Console.WriteLine("NOT_PATCHED");
+        return 1;
+    }
+
+    try
+    {
+        ValidateRuntimeBindings(module);
+        Console.WriteLine("PATCHED");
+        return 0;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"INVALID_PATCH: {exception.Message}");
+        return 3;
+    }
 }
 
 if (args.Length != 4 || !args[0].Equals("apply", StringComparison.OrdinalIgnoreCase))
@@ -51,6 +65,7 @@ using (var verificationModule = ModuleDefMD.Load(outputPath))
     {
         throw new InvalidOperationException("Output verification failed.");
     }
+    ValidateRuntimeBindings(verificationModule);
     if (verificationModule.GetAssemblyRefs().Any(reference =>
             reference.Name.String.Equals("PatchPayload", StringComparison.OrdinalIgnoreCase)))
     {
@@ -370,7 +385,22 @@ static IMethod MapMethod(IMethod sourceMethod, ModuleDef sourceModule, ModuleDef
 
     if (sourceMethod.Name == "get_Value" && parameterCount == 0 && destinationType.BaseType != null)
     {
-        var signature = importer.Import(sourceMethod.MethodSig!);
+        var baseType = destinationType.BaseType.ResolveTypeDef()
+            ?? throw new InvalidOperationException(
+                $"Could not resolve base type {destinationType.BaseType.FullName} for {sourceMethod.FullName}.");
+        var baseMethods = baseType.Methods
+            .Where(method => method.Name == sourceMethod.Name && method.MethodSig.Params.Count == parameterCount)
+            .ToList();
+        if (baseMethods.Count != 1)
+        {
+            throw new InvalidOperationException(
+                $"Could not uniquely resolve inherited method {sourceMethod.FullName}.");
+        }
+
+        // The inherited getter returns generic parameter !0, not a concrete bool.
+        // Importing the compile-time stub signature would create a MemberRef that
+        // passes static inspection but throws MissingMethodException at runtime.
+        var signature = importer.Import(baseMethods[0].MethodSig);
         return new MemberRefUser(destinationModule, sourceMethod.Name, signature, destinationType.BaseType);
     }
 
@@ -456,6 +486,33 @@ static bool IsPatched(ModuleDef module)
 
     return requiredFields.All(name => type.Fields.Any(field => field.Name == name)) &&
            requiredMethods.All(name => type.Methods.Any(method => method.Name == name));
+}
+
+static void ValidateRuntimeBindings(ModuleDef module)
+{
+    var type = module.Find(MainWindowName, isReflectionName: false)
+        ?? throw new InvalidOperationException("Target MainWindow was not found.");
+    var keyPress = type.Methods.Single(method => method.Name == "KeyPress");
+    var valueGetters = keyPress.Body.Instructions
+        .Where(instruction =>
+            instruction.OpCode.Code is Code.Call or Code.Callvirt &&
+            instruction.Operand is IMethod method &&
+            method.Name == "get_Value")
+        .Select(instruction => (IMethod)instruction.Operand)
+        .ToList();
+
+    if (valueGetters.Count != 1)
+    {
+        throw new InvalidOperationException(
+            $"Expected one setup Value getter in KeyPress, found {valueGetters.Count}.");
+    }
+
+    var returnType = valueGetters[0].MethodSig?.RetType;
+    if (returnType == null || returnType.ElementType != ElementType.Var)
+    {
+        throw new InvalidOperationException(
+            "The inherited setup Value getter is not bound with its generic !0 return signature.");
+    }
 }
 
 static string GetSha256(string path)
