@@ -54,8 +54,9 @@ namespace SMIDIToKey
         private readonly HashSet<int> tapEligibleOctaveKeys = new();
         private readonly HashSet<int> passthroughKeyboardKeys = new();
         private readonly Dictionary<int, List<int>> activeKeyboardNotes = new();
-        private int lowerHandBaseNote = 48;
-        private int upperHandBaseNote = 60;
+        private bool spaceResetTapEligible;
+        private int lowerHandBaseNote = 60;
+        private int upperHandBaseNote = 48;
 
         private void KeyPress(EHookStruct hookStruct, bool isDown, out bool handle)
         {
@@ -80,7 +81,9 @@ namespace SMIDIToKey
                 if (IsOctaveKey(key))
                 {
                     // A modifier changes an octave only when it was tapped by itself.
-                    if (pressedOctaveKeys.Count == 0)
+                    var resetKeyHeld = pressedKeys.Contains((int)Keys.Space);
+                    spaceResetTapEligible = false;
+                    if (pressedOctaveKeys.Count == 0 && !resetKeyHeld)
                     {
                         tapEligibleOctaveKeys.Add(virtualKey);
                     }
@@ -96,9 +99,18 @@ namespace SMIDIToKey
                 {
                     // Ctrl+A, Shift+Q, Alt+Tab, and similar chords remain normal Windows input.
                     tapEligibleOctaveKeys.Clear();
+                    spaceResetTapEligible = false;
                     passthroughKeyboardKeys.Add(virtualKey);
                     return;
                 }
+
+                if (IsResetKey(key))
+                {
+                    spaceResetTapEligible = pressedKeys.Count == 1;
+                    return;
+                }
+
+                spaceResetTapEligible = false;
 
                 var notes = ResolveKeyboardNotes(key);
                 if (notes.Count == 0)
@@ -136,6 +148,22 @@ namespace SMIDIToKey
                 return;
             }
 
+            if (IsResetKey(key))
+            {
+                var resetOctaves = spaceResetTapEligible;
+                spaceResetTapEligible = false;
+                if (passthroughKeyboardKeys.Remove(virtualKey))
+                {
+                    return;
+                }
+                if (resetOctaves)
+                {
+                    ResetHandOctaves();
+                    UpdateTwoHandIndicator();
+                }
+                return;
+            }
+
             if (passthroughKeyboardKeys.Remove(virtualKey))
             {
                 return;
@@ -159,6 +187,11 @@ namespace SMIDIToKey
                    key == Keys.RShiftKey ||
                    key == Keys.LControlKey ||
                    key == Keys.RControlKey;
+        }
+
+        private static bool IsResetKey(Keys key)
+        {
+            return key == Keys.Space;
         }
 
         private bool ShouldPassThroughKeyboardKey(Keys key)
@@ -256,6 +289,12 @@ namespace SMIDIToKey
             }
         }
 
+        private void ResetHandOctaves()
+        {
+            upperHandBaseNote = 48; // Top row / left hand: C3
+            lowerHandBaseNote = 60; // Bottom row / right hand: C4
+        }
+
         private static string FormatOctaveRange(int baseNote)
         {
             var octave = baseNote / 12 - 1;
@@ -264,7 +303,7 @@ namespace SMIDIToKey
 
         private void UpdateTwoHandIndicator()
         {
-            Title = $"SMIDIToKey [左手 {FormatOctaveRange(lowerHandBaseNote)} | 右手 {FormatOctaveRange(upperHandBaseNote)}]";
+            Title = $"SMIDIToKey [上排/左手 {FormatOctaveRange(upperHandBaseNote)} | 下排/右手 {FormatOctaveRange(lowerHandBaseNote)}]";
         }
     }
 }

@@ -91,6 +91,7 @@ static void ApplyPatch(ModuleDef targetModule, ModuleDef payloadModule)
         "tapEligibleOctaveKeys",
         "passthroughKeyboardKeys",
         "activeKeyboardNotes",
+        "spaceResetTapEligible",
         "lowerHandBaseNote",
         "upperHandBaseNote"
     };
@@ -112,11 +113,13 @@ static void ApplyPatch(ModuleDef targetModule, ModuleDef payloadModule)
     var addedMethodNames = new[]
     {
         "IsOctaveKey",
+        "IsResetKey",
         "ShouldPassThroughKeyboardKey",
         "ResolveKeyboardNotes",
         "GetUpperHandOffset",
         "GetLowerHandOffset",
         "ChangeOctave",
+        "ResetHandOctaves",
         "FormatOctaveRange",
         "UpdateTwoHandIndicator"
     };
@@ -469,17 +472,20 @@ static bool IsPatched(ModuleDef module)
         "tapEligibleOctaveKeys",
         "passthroughKeyboardKeys",
         "activeKeyboardNotes",
+        "spaceResetTapEligible",
         "lowerHandBaseNote",
         "upperHandBaseNote"
     };
     var requiredMethods = new[]
     {
         "IsOctaveKey",
+        "IsResetKey",
         "ShouldPassThroughKeyboardKey",
         "ResolveKeyboardNotes",
         "GetUpperHandOffset",
         "GetLowerHandOffset",
         "ChangeOctave",
+        "ResetHandOctaves",
         "FormatOctaveRange",
         "UpdateTwoHandIndicator"
     };
